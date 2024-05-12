@@ -13,17 +13,19 @@ import (
 
 	"github.com/mibk/dupl/job"
 	"github.com/mibk/dupl/printer"
+	"github.com/mibk/dupl/suffixtree"
 	"github.com/mibk/dupl/syntax"
 )
 
 const defaultThreshold = 15
 
 var (
-	paths     = []string{"."}
-	vendor    = flag.Bool("vendor", false, "")
-	verbose   = flag.Bool("verbose", false, "")
-	threshold = flag.Int("threshold", defaultThreshold, "")
-	files     = flag.Bool("files", false, "")
+	paths         = []string{"."}
+	vendor        = flag.Bool("vendor", false, "")
+	verbose       = flag.Bool("verbose", false, "")
+	fromThreshold = flag.Int("from-threshold", defaultThreshold, "")
+	toThreshold   = flag.Int("to-threshold", defaultThreshold, "")
+	files         = flag.Bool("files", false, "")
 
 	html     = flag.Bool("html", false, "")
 	plumbing = flag.Bool("plumbing", false, "")
@@ -36,7 +38,7 @@ const (
 
 func init() {
 	flag.BoolVar(verbose, "v", false, "alias for -verbose")
-	flag.IntVar(threshold, "t", defaultThreshold, "alias for -threshold")
+	flag.IntVar(fromThreshold, "t", defaultThreshold, "alias for -threshold")
 }
 
 func main() {
@@ -62,17 +64,6 @@ func main() {
 	if *verbose {
 		log.Println("Searching for clones")
 	}
-	mchan := t.FindDuplOver(*threshold)
-	duplChan := make(chan syntax.Match)
-	go func() {
-		for m := range mchan {
-			match := syntax.FindSyntaxUnits(*data, m, *threshold)
-			if len(match.Frags) > 0 {
-				duplChan <- match
-			}
-		}
-		close(duplChan)
-	}()
 
 	newPrinter := printer.NewText
 	if *html {
@@ -81,9 +72,53 @@ func main() {
 		newPrinter = printer.NewPlumbing
 	}
 	p := newPrinter(os.Stdout, ioutil.ReadFile)
-	if err := printDupls(p, duplChan); err != nil {
+
+	duplChans := make([]<-chan syntax.Match, 0)
+	for i := *fromThreshold; i <= *toThreshold; i += 1 {
+		mchan := t.FindDuplOver(*fromThreshold)
+		duplChan := make(chan syntax.Match)
+		go findDuplicates(data, i, mchan, duplChan)
+		duplChans = append(duplChans, duplChan)
+	}
+
+	if err := printDupls(p, duplChans); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func findDuplicates(data *[]*syntax.Node, threshold int, mchan <-chan suffixtree.Match, duplChan chan<- syntax.Match) {
+	for m := range mchan {
+		match := syntax.FindSyntaxUnits(*data, m, threshold)
+		if len(match.Frags) > 0 {
+			// this match should contain all the filenames to avoid duplicates within the same file
+			// and just print out the same file.
+			matchesFiles := func() bool {
+				// just use a map, it's easy to compare
+				pathMap := make(map[string]struct{})
+				for _, path := range paths {
+					pathMap[path] = struct{}{}
+				}
+
+				for i := 0; i < len(match.Frags) && len(pathMap) != 0; i++ {
+					for _, node := range match.Frags[i] {
+						for parentPath, _ := range pathMap {
+							if strings.HasPrefix(node.Filename, parentPath) {
+								delete(pathMap, parentPath)
+								break
+							}
+						}
+					}
+				}
+
+				return len(pathMap) == 0
+			}
+
+			if matchesFiles() {
+				duplChan <- match
+			}
+		}
+	}
+	close(duplChan)
 }
 
 func filesFeed() chan string {
@@ -133,10 +168,12 @@ func crawlPaths(paths []string) chan string {
 	return fchan
 }
 
-func printDupls(p printer.Printer, duplChan <-chan syntax.Match) error {
+func printDupls(p printer.Printer, duplChans []<-chan syntax.Match) error {
 	groups := make(map[string][][]*syntax.Node)
-	for dupl := range duplChan {
-		groups[dupl.Hash] = append(groups[dupl.Hash], dupl.Frags...)
+	for _, duplChan := range duplChans {
+		for dupl := range duplChan {
+			groups[dupl.Hash] = append(groups[dupl.Hash], dupl.Frags...)
+		}
 	}
 	keys := make([]string, 0, len(groups))
 	for k := range groups {
@@ -195,8 +232,10 @@ Flags:
     	output the results as HTML, including duplicate code fragments
   -plumbing
     	plumbing (easy-to-parse) output for consumption by scripts or tools
-  -t, -threshold size
+  -from-threshold size
     	minimum token sequence size as a clone (default 15)
+  -to-threshold size
+        maximum token sequence size as a clone (default 15)
   -vendor
     	check files in vendor directory
   -v, -verbose

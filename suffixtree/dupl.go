@@ -91,7 +91,8 @@ func walkTrans(parent *tran, length, threshold int, ch chan<- Match) *contextLis
 		}
 	}
 	if length >= threshold && len(cl.lists) > 1 {
-		m := Match{cl.getAll(), Pos(length)}
+		allPos := cl.getAll()
+		m := Match{allPos, Pos(length)}
 		ch <- m
 	}
 	return cl
