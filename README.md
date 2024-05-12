@@ -1,5 +1,13 @@
 # dupl [![Build Status](https://travis-ci.org/mibk/dupl.png)](https://travis-ci.org/mibk/dupl)
 
+**VERSION ALTERED** to print out differences between all the directories. This changes avoid showing up duplicates within the same directory only.
+Also I modified the version to add a range of thresholds, so it compares with a range of changes and prints out to the same output file.
+
+```bash
+$ dupl --from-threshold 15 --to-threshold 500 -html >docker.html
+```
+
+
 **dupl** is a tool written in Go for finding code clones. So far it can find clones only
 in the Go source files. The method uses suffix tree for serialized ASTs. It ignores values
 of AST nodes. It just operates with their types (e.g. `if a == 13 {}` and `if x == 100 {}` are
