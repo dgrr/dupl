@@ -74,8 +74,8 @@ func main() {
 	p := newPrinter(os.Stdout, ioutil.ReadFile)
 
 	duplChans := make([]<-chan syntax.Match, 0)
-	for i := *fromThreshold; i <= *toThreshold; i += 1 {
-		mchan := t.FindDuplOver(*fromThreshold)
+	for i := *fromThreshold; i >= *toThreshold; i -= 1 {
+		mchan := t.FindDuplOver(i)
 		duplChan := make(chan syntax.Match)
 		go findDuplicates(data, i, mchan, duplChan)
 		duplChans = append(duplChans, duplChan)
